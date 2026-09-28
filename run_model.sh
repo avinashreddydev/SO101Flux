@@ -32,16 +32,7 @@ if ! command -v nvidia-smi >/dev/null 2>&1 || [ "$(nvidia-smi --query-gpu=count 
   echo "warning: expected 2 GPUs (DiT+VAE on cuda:0, text encoder on cuda:1); proceeding anyway." >&2
 fi
 
-mkdir -p remote_inference
-if [ ! -f remote_inference/.api_key ]; then
-  echo "Generating a new server API key at remote_inference/.api_key"
-  openssl rand -hex 32 > remote_inference/.api_key
-  chmod 600 remote_inference/.api_key
-fi
-export FLUX_API_KEY
-FLUX_API_KEY="$(cat remote_inference/.api_key)"
-
-echo "Starting server on $HOST:$PORT ..."
+echo "Starting server on $HOST:$PORT (no API key — dev mode)..."
 "$VENV/bin/uvicorn" flux3_lerobot_server:app \
   --app-dir remote_inference \
   --host "$HOST" --port "$PORT" --workers 1 &
@@ -67,7 +58,6 @@ done
 echo "Loading $CHECKPOINT (first load can take a few minutes)..."
 curl -sf -X POST "http://127.0.0.1:$PORT/v1/model/load" \
   -H 'Content-Type: application/json' \
-  -H "X-API-Key: $FLUX_API_KEY" \
   -d "{\"checkpoint\": \"$CHECKPOINT\"}"
 echo
 echo
@@ -77,10 +67,9 @@ cat <<EOF
 Server ready.
   URL (LAN):    http://${LAN_IP:-<this-machine-ip>}:$PORT
   URL (local):  http://127.0.0.1:$PORT
-  API key:      $FLUX_API_KEY   (also saved in remote_inference/.api_key)
 
 On the robot machine, run run_robot.sh with:
-  FLUX_SERVER=http://${LAN_IP:-<this-machine-ip>}:$PORT FLUX_API_KEY=$FLUX_API_KEY ./run_robot.sh \\
+  FLUX_SERVER=http://${LAN_IP:-<this-machine-ip>}:$PORT ./run_robot.sh \\
     --port /dev/ttyACM0 --robot-id so101 --scene-camera 0 --wrist-camera 1 --task "..."
 
 Press Ctrl+C to stop the server.

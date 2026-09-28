@@ -17,36 +17,21 @@ needs to run on the robot machine.
 
 ```bash
 cd /home/av131693/Desktop/research/so101flux
-API_KEY=$(cat remote_inference/.api_key)   # generated for you; treat it like a password
-export FLUX_API_KEY="$API_KEY"
-.venv/bin/uvicorn flux3_lerobot_server:app \
-  --app-dir remote_inference \
-  --host 0.0.0.0 --port 8000 --workers 1
+./run_model.sh
 ```
 
-Load the model once per server restart:
+This starts the server, waits for it to come up, and loads the checkpoint automatically,
+printing the LAN URL to use from the robot machine when it's ready. This machine has two 24 GiB
+GPUs; the server puts the DiT + video VAE on `cuda:0` (~16 GiB) and the Qwen3-VL text encoder on
+`cuda:1` (~9 GiB) — verified working end-to-end. A single 24 GiB GPU is **not** enough for this
+checkpoint's inference (only loading fits; the diffusion sampling step itself needs more
+headroom), so keep both GPUs free for this process. Press Ctrl+C to stop it.
 
-```bash
-curl -X POST http://localhost:8000/v1/model/load \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $FLUX_API_KEY" \
-  -d '{"checkpoint": "black-forest-labs/flux-3-action-so101"}'
-```
-
-This machine has two 24 GiB GPUs; the server automatically puts the DiT + video VAE on `cuda:0`
-(~16 GiB) and the Qwen3-VL text encoder on `cuda:1` (~9 GiB) — verified working end-to-end. A
-single 24 GiB GPU is **not** enough for this checkpoint's inference (only loading fits; the
-diffusion sampling step itself needs more headroom), so keep both GPUs free for this process.
-
-Find this machine's LAN IP for the robot machine to connect to:
-
-```bash
-hostname -I
-```
-
-**Security**: `--host 0.0.0.0` exposes port 8000 to your whole LAN. Keep it on a trusted
-network or behind a VPN/SSH tunnel — do not expose it to the public internet. The API key in
-`remote_inference/.api_key` is required on every request; treat that file like a secret.
+**Security (dev setup, no auth)**: `run_model.sh` binds `0.0.0.0` and starts the server with no
+API key — fine on a trusted LAN for development, not for anything public-facing. The server
+(`flux3_lerobot_server.py`) does support an `X-API-Key` check when `FLUX_API_KEY` is set in its
+environment, and `robot_client.py --api-key` can send one; `run_model.sh` just doesn't wire that
+up by default. Add it back in both scripts if you need it.
 
 ## 2. Robot machine setup
 

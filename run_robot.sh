@@ -6,20 +6,19 @@
 # the Feetech motor SDK into it on first run).
 #
 # Usage:
-#   FLUX_SERVER=http://SERVER_IP:8000 FLUX_API_KEY=... \
+#   FLUX_SERVER=http://SERVER_IP:8000 \
 #     ./run_robot.sh --port /dev/ttyACM0 --robot-id so101 \
 #                     --scene-camera 0 --wrist-camera 1 \
 #                     --task "put the blue box into the container" [--duration 30]
 #
 # All flags after the script name are forwarded to remote_inference/robot_client.py
-# (run it with --help for the full list). FLUX_SERVER defaults to the local server
-# (http://127.0.0.1:8000) for a same-machine test; FLUX_API_KEY defaults to the key in
-# remote_inference/.api_key when present (i.e. when run on the same machine as run_model.sh).
+# (run it with --help for the full list). FLUX_SERVER defaults to this GPU server's LAN
+# address; override it if the server moves.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 VENV=".venv"
-SERVER="${FLUX_SERVER:-http://127.0.0.1:8000}"
+SERVER="${FLUX_SERVER:-http://10.171.42.11:8000}"
 
 if [ ! -x "$VENV/bin/python" ]; then
   echo "error: $VENV not found. On a dedicated robot machine (no GPU needed), set up a" >&2
@@ -35,18 +34,7 @@ if ! "$VENV/bin/python" -c "import scservo_sdk" >/dev/null 2>&1; then
 fi
 "$VENV/bin/python" -c "import requests" >/dev/null 2>&1 || uv pip install --python "$VENV/bin/python" requests
 
-if [ -z "${FLUX_API_KEY:-}" ]; then
-  if [ -f remote_inference/.api_key ]; then
-    FLUX_API_KEY="$(cat remote_inference/.api_key)"
-  else
-    echo "error: FLUX_API_KEY not set and remote_inference/.api_key not found." >&2
-    echo "Set FLUX_API_KEY to the value run_model.sh printed on the server machine." >&2
-    exit 1
-  fi
-fi
-
 echo "Server: $SERVER"
 exec "$VENV/bin/python" remote_inference/robot_client.py \
   --server "$SERVER" \
-  --api-key "$FLUX_API_KEY" \
   "$@"

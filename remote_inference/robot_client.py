@@ -22,10 +22,11 @@ Then run this script, e.g.:
 
     python robot_client.py \\
       --server http://SERVER_IP:8000 \\
-      --api-key "$FLUX_API_KEY" \\
       --port /dev/ttyACM0 --robot-id so101 \\
       --scene-camera 0 --wrist-camera 1 \\
       --task "put the blue box into the container"
+
+Pass --api-key if the server was started with FLUX_API_KEY set (it isn't by default).
 
 Safety is entirely the client's job: the server only returns numbers. This script enforces a
 per-tick joint-motion cap (via LeRobot's `max_relative_target`), a response staleness timeout,
@@ -71,9 +72,9 @@ def frame_to_jpeg_bytes(frame) -> bytes:
 
 
 class ServerClient:
-    def __init__(self, base_url: str, api_key: str, session_id: str):
+    def __init__(self, base_url: str, api_key: str | None, session_id: str):
         self.base_url = base_url.rstrip("/")
-        self.headers = {"X-API-Key": api_key}
+        self.headers = {"X-API-Key": api_key} if api_key else {}
         self.session_id = session_id
 
     def health(self) -> dict:
@@ -189,7 +190,7 @@ def run(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--server", required=True, help="Base URL of the inference server, e.g. http://192.168.1.50:8000")
-    parser.add_argument("--api-key", required=True, help="Value of the server's FLUX_API_KEY")
+    parser.add_argument("--api-key", default=None, help="Value of the server's FLUX_API_KEY, if it has one set")
     parser.add_argument("--checkpoint", default="black-forest-labs/flux-3-action-so101")
     parser.add_argument("--session-id", default="so101-episode-1")
     parser.add_argument("--port", required=True, help="Serial port of the SO-101, e.g. /dev/ttyACM0")
