@@ -1,0 +1,19 @@
+# Python virtual environments
+.venv/
+*/.venv/
+
+# Vendored / cloned upstream repos (each has its own git history; not vendored here)
+/lerobot/
+/flux-action/
+
+# Secrets
+remote_inference/.api_key
+*.key
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs and local scratch
+*.log
+/tmp/
