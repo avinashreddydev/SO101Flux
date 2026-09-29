@@ -81,7 +81,7 @@ def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
         raise HTTPException(status_code=401, detail="invalid or missing X-API-Key")
 
 
-def decode_rgb_image(payload: bytes, field_name: str) -> torch.Tensor:
+def decode_rgb_image(payload: bytes, field_name: str, target_hw: tuple[int, int] | None = None) -> torch.Tensor:
     if not payload:
         raise HTTPException(status_code=422, detail=f"{field_name} image is empty")
     if len(payload) > MAX_IMAGE_BYTES:
@@ -91,11 +91,18 @@ def decode_rgb_image(payload: bytes, field_name: str) -> torch.Tensor:
             image = image.convert("RGB")
             if max(image.size) > MAX_IMAGE_SIDE:
                 raise HTTPException(status_code=422, detail=f"{field_name} image is too large")
+            if target_hw is not None:
+                # The two cameras must already share (H, W) before the preprocessor's history
+                # buffer stacks them — its own resize-to-canvas step runs too late to reconcile
+                # mismatched raw inputs (e.g. cameras with different native resolutions), so
+                # resize to the checkpoint's per-camera size here regardless of source resolution.
+                h, w = target_hw
+                image = image.resize((w, h), Image.BILINEAR)
             array = np.asarray(image, dtype=np.uint8).copy()
     except (UnidentifiedImageError, OSError) as exc:
         raise HTTPException(status_code=422, detail=f"invalid {field_name} image") from exc
-    # (H, W, 3) uint8 -> (1, 3, H, W) float32 in [0, 1]; the preprocessor resizes to the
-    # checkpoint's canvas and handles normalization from there.
+    # (H, W, 3) uint8 -> (1, 3, H, W) float32 in [0, 1]; the preprocessor handles normalization
+    # from here (and any further resize if target_hw wasn't available yet).
     tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0).float() / 255.0
     return tensor
 
@@ -207,11 +214,24 @@ class Flux3SO101Engine:
                 action_steps=int(policy.config.n_action_steps),
             )
 
+    def camera_target_hw(self, key: str) -> tuple[int, int] | None:
+        """(H, W) the checkpoint expects for this camera key, or None if no model is loaded."""
+        if self.policy is None:
+            return None
+        _, h, w = self.policy.config.input_features[key].shape
+        return h, w
+
     def reset(self, session_id: str) -> None:
         with self.lock:
             if self.policy is None:
                 raise HTTPException(status_code=409, detail="load the model first")
             self.policy.reset()
+            # The preprocessor buffers its own observation/command history (n_obs_steps frames)
+            # independently of the policy's action queue; leaving it unreset lets stale frames
+            # from a previous session (possibly a different image size) get stacked with new
+            # ones and crash the next step with a shape mismatch.
+            self.preprocessor.reset()
+            self.postprocessor.reset()
             self.active_session = session_id
 
     def step(
@@ -306,7 +326,11 @@ async def step(
     # Reading uploads is asynchronous; GPU inference is serialized by the engine lock.
     scene_bytes = await scene.read(MAX_IMAGE_BYTES + 1)
     wrist_bytes = await wrist.read(MAX_IMAGE_BYTES + 1)
-    scene_tensor = decode_rgb_image(scene_bytes, "scene")
-    wrist_tensor = decode_rgb_image(wrist_bytes, "wrist")
+    scene_tensor = decode_rgb_image(
+        scene_bytes, "scene", engine.camera_target_hw("observation.images.scene")
+    )
+    wrist_tensor = decode_rgb_image(
+        wrist_bytes, "wrist", engine.camera_target_hw("observation.images.wrist")
+    )
     state_values = parse_state(state)
     return engine.step(session_id, scene_tensor, wrist_tensor, state_values, task)
